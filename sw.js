@@ -1,7 +1,7 @@
 // 마음 쉼터 껍데기 — 인터넷이 없어도 열리도록 껍데기 파일을 기기에 보관해요.
 // 앱의 화면과 문장은 Apps Script에서 오니 여기는 거의 고칠 일이 없어요.
 // 이 폴더의 파일을 고쳐서 다시 올렸다면 아래 VERSION 숫자를 하나 올려 주세요.
-const VERSION = "maeum-shell-v10";
+const VERSION = "maeum-shell-v11";
 const FILES = [
   "./",
   "./index.html",

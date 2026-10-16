@@ -6,6 +6,7 @@
 <meta name="description" content="마음이 힘들 때 털어놓는 곳">
 <meta name="theme-color" content="#0d1424">
 <meta name="color-scheme" content="only light">
+<meta name="format-detection" content="telephone=no">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -139,7 +140,8 @@ html, body { margin: 0; min-height: 100%; background: #0d1424; color: #f4f1e6; }
     if (!API) { showBoot("아직 준비가 안 됐어. config.js에 주소를 넣어 줘.", false); return; }
     var latest = read(K_LATEST), good = read(K_GOOD);
     if (latest || good) {
-      if (mountBest(latest, good)) check(true); else firstLoad();
+      // 새 편지 확인(앱 안에서)이 먼저 가도록, 앱 업데이트 확인은 조금 뒤에 해요
+      if (mountBest(latest, good)) setTimeout(function () { check(true); }, 2500); else firstLoad();
     } else {
       firstLoad();
     }
