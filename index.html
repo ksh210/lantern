@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="마음이 힘들 때 털어놓는 곳">
+<meta name="theme-color" content="#0d1424">
+<meta name="color-scheme" content="only light">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="마음 쉼터">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>마음 쉼터</title>
+<style id="boot-style">
+html, body { margin: 0; min-height: 100%; background: #0d1424; color: #f4f1e6; }
+#boot { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; padding: 24px; text-align: center;
+  font: 600 20px/1.5 -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+#boot .lamp { width: 88px; height: 88px; border-radius: 50%; animation: boot-breathe 2.4s ease-in-out infinite;
+  background: radial-gradient(circle at 50% 45%, #fff3d6 0 16%, #f6c77e 32%, #e09a45 58%, rgba(224, 154, 69, 0) 72%); box-shadow: 0 0 40px rgba(242, 183, 101, 0.5); }
+#boot button { font: inherit; color: #0d1424; background: #f2b765; border: 0; border-radius: 999px; padding: 10px 26px; }
+@keyframes boot-breathe { 0%, 100% { opacity: 0.55; transform: scale(0.96); } 50% { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { #boot .lamp { animation: none; } }
+</style>
+</head>
+<body>
+<div id="boot" role="status"><div class="lamp"></div><p id="boot-msg">마음 쉼터를 여는 중…</p><button id="boot-retry" type="button" hidden>다시 해 볼게</button></div>
+
+<script src="config.js"></script>
+<script>
+/*
+ * 마음 쉼터 껍데기
+ * 앱의 화면과 문장은 구글 Apps Script에서 가져와요. 이 파일은 거의 고칠 일이 없어요.
+ *  - 폰에 저장해 둔 앱을 먼저 열고, 뒤에서 새 버전이 있는지 확인해요.
+ *  - 새 버전이 생기면 저장해 두고, 시작 화면에 있을 때는 바로 바꿔요. 아니면 다음에 열 때 바뀌어요.
+ *  - 새 버전에 문제가 있으면 마지막으로 잘 열렸던 버전으로 돌아가요.
+ */
+(function () {
+  "use strict";
+  var API = String((window.MAEUM_CONFIG || {}).apiUrl || "").trim();
+  var K_LATEST = "maeum.app.latest", K_GOOD = "maeum.app.good";
+  var mountedVersion = null, lastCheck = 0;
+  var BOOT = '<div id="boot" role="status"><div class="lamp"></div><p id="boot-msg"></p><button id="boot-retry" type="button" hidden>다시 해 볼게</button></div>';
+
+  function $(id) { return document.getElementById(id); }
+  function read(k) {
+    try { var o = JSON.parse(localStorage.getItem(k)); return o && typeof o.html === "string" && o.html && o.version ? o : null; } catch (e) { return null; }
+  }
+  function write(k, o) { try { localStorage.setItem(k, JSON.stringify(o)); return true; } catch (e) { return false; } }
+  function bootStyle(on) { var s = $("boot-style"); if (s) s.media = on ? "all" : "not all"; }
+
+  function showBoot(msg, retry) {
+    if (!$("boot")) { document.body.innerHTML = BOOT; }
+    bootStyle(true);
+    $("boot-msg").textContent = msg;
+    var b = $("boot-retry"); b.hidden = !retry; b.onclick = function () { location.reload(); };
+  }
+
+  // 받아 온 앱을 화면에 올려요. 앱이 끝까지 시작됐는지(window.__maeum)로 성공을 판단해요.
+  function mount(bundle) {
+    var d = new DOMParser().parseFromString(bundle.html, "text/html");
+    Array.prototype.forEach.call(document.querySelectorAll("[data-maeum-app]"), function (n) { n.parentNode.removeChild(n); });
+    Array.prototype.forEach.call(d.head.querySelectorAll("style, link"), function (n) {
+      var c = document.importNode(n, true); c.setAttribute("data-maeum-app", ""); document.head.appendChild(c);
+    });
+    var codes = [];
+    Array.prototype.forEach.call(d.body.querySelectorAll("script"), function (s) { codes.push(s.textContent); s.parentNode.removeChild(s); });
+    bootStyle(false);
+    document.body.innerHTML = "";
+    while (d.body.firstChild) document.body.appendChild(document.adoptNode(d.body.firstChild));
+    try { delete window.__maeum; } catch (e) { window.__maeum = undefined; }
+    codes.forEach(function (c) { var s = document.createElement("script"); s.textContent = c; document.body.appendChild(s); });
+    return !!window.__maeum;
+  }
+
+  function mountBest(latest, good) {
+    if (latest && mount(latest)) {
+      mountedVersion = latest.version;
+      if (!good || good.version !== latest.version) write(K_GOOD, latest);
+      return true;
+    }
+    if (good && (!latest || good.version !== latest.version) && mount(good)) { mountedVersion = good.version; return true; }
+    return false;
+  }
+
+  function fetchApp(knownVersion) {
+    var url = API + (API.indexOf("?") < 0 ? "?" : "&") + "action=app" + (knownVersion ? "&v=" + encodeURIComponent(knownVersion) : "");
+    var ctl = "AbortController" in window ? new AbortController() : null;
+    var timer = ctl ? setTimeout(function () { ctl.abort(); }, 25000) : 0;
+    return fetch(url, { cache: "no-store", signal: ctl ? ctl.signal : undefined })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        clearTimeout(timer);
+        if (!j || !j.ok) throw new Error("bad");
+        if (j.same) return { same: true };
+        if (typeof j.html !== "string" || !j.version || j.html.indexOf("__maeum") < 0) throw new Error("bad");
+        return { version: String(j.version), html: j.html };
+      }, function (e) { clearTimeout(timer); throw e; });
+  }
+
+  function onStartScreen() {
+    var s = $("s-start");
+    return !!s && !s.hidden && !s.classList.contains("leaving") && getComputedStyle(s).display !== "none";
+  }
+  function mayReload(v) {
+    try { if (sessionStorage.getItem("maeum.reloaded") === v) return false; sessionStorage.setItem("maeum.reloaded", v); } catch (e) {}
+    return true;
+  }
+
+  // 새 버전이 있는지 확인해요
+  function check(force) {
+    var now = Date.now();
+    if (!force && now - lastCheck < 5 * 60 * 1000) return;
+    lastCheck = now;
+    var cur = read(K_LATEST);
+    fetchApp(cur && cur.version).then(function (r) {
+      if (r.same) return;
+      if (!write(K_LATEST, r)) return;
+      if (mountedVersion !== r.version && onStartScreen() && mayReload(r.version)) location.reload();
+    }).catch(function () {});
+  }
+
+  function firstLoad() {
+    showBoot("마음 쉼터를 여는 중…", false);
+    var slow = setTimeout(function () { showBoot("조금 걸리고 있어. 인터넷이 켜져 있는지 확인해 줘.", false); }, 7000);
+    fetchApp(null).then(function (r) {
+      clearTimeout(slow);
+      write(K_LATEST, r);
+      if (!mountBest(r, null)) throw new Error("mount");
+    }).catch(function () {
+      clearTimeout(slow);
+      showBoot("열지 못했어. 인터넷을 확인하고 다시 해 봐.", true);
+    });
+  }
+
+  function start() {
+    if (!API) { showBoot("아직 준비가 안 됐어. config.js에 주소를 넣어 줘.", false); return; }
+    var latest = read(K_LATEST), good = read(K_GOOD);
+    if (latest || good) {
+      if (mountBest(latest, good)) check(true); else firstLoad();
+    } else {
+      firstLoad();
+    }
+    document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") check(false); });
+    window.addEventListener("online", function () { check(true); });
+  }
+
+  if ("serviceWorker" in navigator && location.protocol === "https:" && !/claude/.test(location.hostname)) {
+    window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });
+  }
+  setTimeout(start, 0);
+})();
+</script>
+</body>
+</html>
